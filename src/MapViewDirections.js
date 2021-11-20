@@ -1,12 +1,11 @@
 import React, { Component } from 'react';
 import PropTypes from 'prop-types';
-import MapView from 'react-native-maps';
+import MapView from 'react-native-maps-osmdroid';
 import isEqual from 'lodash.isequal';
 
 const WAYPOINT_LIMIT = 10;
 
 class MapViewDirections extends Component {
-
 	constructor(props) {
 		super(props);
 
@@ -73,6 +72,30 @@ class MapViewDirections extends Component {
 		return points;
 	}
 
+	buildMappingData = (route, precision) => ({
+		distance:
+			route.legs.reduce((carry, curr) => {
+				return carry + curr.distance.value;
+			}, 0) / 1000,
+		duration:
+			route.legs.reduce((carry, curr) => {
+				return (
+					carry +
+				(curr.duration_in_traffic
+					? curr.duration_in_traffic.value
+					: curr.duration.value)
+				);
+			}, 0) / 60,
+		coordinates:
+			precision === 'low'
+				? this.decode([{ polyline: route.overview_polyline }])
+				: route.legs.reduce((carry, curr) => {
+					return [...carry, ...this.decode(curr.steps)];
+				}, []),
+		fare: route.fare,
+		waypointOrder: route.waypoint_order,
+	})
+
 	fetchAndRenderRoute = (props) => {
 
 		let {
@@ -92,12 +115,13 @@ class MapViewDirections extends Component {
 			precision = 'low',
 			timePrecision = 'none',
 			channel,
+			geoData,
 		} = props;
 
-		if (!apikey) {
-			console.warn(`MapViewDirections Error: Missing API Key`); // eslint-disable-line no-console
-			return;
-		}
+		// if (!apikey) {
+		// 	console.warn(`MapViewDirections Error: Missing API Key`); // eslint-disable-line no-console
+		// 	return;
+		// }
 
 		if (!initialOrigin || !initialDestination) {
 			return;
@@ -174,7 +198,7 @@ class MapViewDirections extends Component {
 			}
 
 			return (
-				this.fetchRoute(directionsServiceBaseUrl, origin, waypoints, destination, apikey, mode, language, region, precision, timePrecisionString, channel)
+				this.fetchRoute(directionsServiceBaseUrl, origin, waypoints, destination, apikey, mode, language, region, precision, timePrecisionString, channel, geoData)
 					.then(result => {
 						return result;
 					})
@@ -227,8 +251,14 @@ class MapViewDirections extends Component {
 			});
 	}
 
-	fetchRoute(directionsServiceBaseUrl, origin, waypoints, destination, apikey, mode, language, region, precision, timePrecision, channel) {
+	fetchRoute(directionsServiceBaseUrl, origin, waypoints, destination, apikey, mode, language, region, precision, timePrecision, channel, geoData) {
 
+		if (geoData && geoData.routes.length) {
+			const route = geoData.routes[0];
+
+			return Promise.resolve(this.buildMappingData(route, precision));
+		}
+		
 		// Define the URL to call. Only add default parameters to the URL if it's a string.
 		let url = directionsServiceBaseUrl;
 		if (typeof (directionsServiceBaseUrl) === 'string') {
@@ -254,27 +284,7 @@ class MapViewDirections extends Component {
 
 					const route = json.routes[0];
 
-					return Promise.resolve({
-						distance: route.legs.reduce((carry, curr) => {
-							return carry + curr.distance.value;
-						}, 0) / 1000,
-						duration: route.legs.reduce((carry, curr) => {
-							return carry + (curr.duration_in_traffic ? curr.duration_in_traffic.value : curr.duration.value);
-						}, 0) / 60,
-						coordinates: (
-							(precision === 'low') ?
-								this.decode([{polyline: route.overview_polyline}]) :
-								route.legs.reduce((carry, curr) => {
-									return [
-										...carry,
-										...this.decode(curr.steps),
-									];
-								}, [])
-						),
-						fare: route.fare,
-						waypointOrder: route.waypoint_order,
-						legs: route.legs,
-					});
+					return Promise.resolve(this.buildMappingData(route, precision));
 
 				} else {
 					return Promise.reject();
@@ -304,6 +314,7 @@ class MapViewDirections extends Component {
 			language, // eslint-disable-line no-unused-vars
 			region, // eslint-disable-line no-unused-vars
 			precision,  // eslint-disable-line no-unused-vars
+			geoData, // eslint-disable-line no-unused-vars
 			...props
 		} = this.props;
 
@@ -338,7 +349,8 @@ MapViewDirections.propTypes = {
 			longitude: PropTypes.number.isRequired,
 		}),
 	]),
-	apikey: PropTypes.string.isRequired,
+	apikey: PropTypes.string,
+	geoData: PropTypes.object,
 	onStart: PropTypes.func,
 	onReady: PropTypes.func,
 	onError: PropTypes.func,
